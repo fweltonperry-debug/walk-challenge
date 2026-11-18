@@ -142,6 +142,27 @@ export async function POST(req: Request) {
         closedCount++;
       }
 
+      // 1b. Auto-renew: open the next pool of the same type
+      const DURATION_DAYS: Record<string, number> = { daily: 1, weekly: 7, monthly: 30, yearly: 365 };
+      for (const pool of endedPools) {
+        const days = DURATION_DAYS[pool.type];
+        if (!days) continue;
+        const start = new Date(Math.max(Date.now(), new Date(pool.endsAt).getTime()));
+        const [next] = await db
+          .insert(pools)
+          .values({
+            type: pool.type,
+            title: pool.title,
+            entryFee: pool.entryFee,
+            startsAt: start,
+            endsAt: new Date(start.getTime() + days * 86400000),
+            status: "open",
+            maxParticipants: 35,
+          })
+          .returning();
+        await log("info", `🔁 New ${pool.type} pool #${next.id} opened (ends ${next.endsAt.toISOString()})`, { poolId: next.id });
+      }
+
       // 2. Pay all queued payouts via Cash App (simulated API call)
       const queued = await db.select().from(payouts).where(eq(payouts.status, "queued"));
       let paidCount = 0;
