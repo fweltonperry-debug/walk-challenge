@@ -1,13 +1,9 @@
 {
-	"appId": "com.stepcash.app",
-	"appName": "StepCash",
-	"webDir": "mobile-www",
+	"appId": "com.walkchallenge.app",
+	"appName": "Walk Challenge",
+	"webDir": "www",
 	"server": {
-		"url": "https://stepcash.vercel.app",
-		"cleartext": false,
-		"androidScheme": "https"
-	},
-	"android": {
-		"backgroundColor": "#0B0F0C"
+		"url": "https://walk-challenge-six.vercel.app",
+		"cleartext": false
 	}
 }

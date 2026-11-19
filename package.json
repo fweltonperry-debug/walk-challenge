@@ -12,7 +12,7 @@
     "@capacitor/android": "^8.6.2",
     "@capacitor/cli": "^8.6.2",
     "@capacitor/core": "^8.6.2",
-    "capacitor-health": "^8.4.0",
+    "@capgo/capacitor-health": "^8.13.0",
     "dotenv": "17.3.1",
     "drizzle-orm": "0.45.2",
     "next": "16.4.2",

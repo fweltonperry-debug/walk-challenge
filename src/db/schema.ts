@@ -1,81 +1,113 @@
-import { pgTable, serial, varchar, integer, decimal, timestamp, boolean, text, jsonb, date } from "drizzle-orm/pg-core";
+import {
+  date,
+  integer,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
-  username: varchar("username", { length: 50 }).notNull().unique(),
-  displayName: varchar("display_name", { length: 100 }).notNull(),
-  cashTag: varchar("cash_tag", { length: 50 }).notNull(),
-  isAdmin: boolean("is_admin").default(false).notNull(),
-  birthDate: date("birth_date"),
-  agreedTermsAt: timestamp("agreed_terms_at"),
-  totalSteps: integer("total_steps").default(0).notNull(),
-  totalEarnings: decimal("total_earnings", { precision: 10, scale: 2 }).default("0").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  cashtag: text("cashtag").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  pinHash: text("pin_hash").notNull(),
+  // Required for the 18+ eligibility check at signup.
+  dateOfBirth: date("date_of_birth", { mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const pools = pgTable("pools", {
-  id: serial("id").primaryKey(),
-  type: varchar("type", { length: 20 }).notNull(), // daily, weekly, monthly, yearly
-  title: varchar("title", { length: 100 }).notNull(),
-  entryFee: decimal("entry_fee", { precision: 10, scale: 2 }).notNull(),
-  maxParticipants: integer("max_participants").default(35).notNull(),
-  startsAt: timestamp("starts_at").notNull(),
-  endsAt: timestamp("ends_at").notNull(),
-  status: varchar("status", { length: 20 }).default("open").notNull(), // open, live, closed, paid
-  houseCutPercent: integer("house_cut_percent").default(10).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const sessions = pgTable("sessions", {
+  token: text("token").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const entries = pgTable("entries", {
+// A room is one 35-seat competition for a tier (daily / weekly / monthly / yearly).
+// status: filling -> active (all seats paid, clock starts) -> completed (winners paid out)
+export const rooms = pgTable("rooms", {
   id: serial("id").primaryKey(),
-  poolId: integer("pool_id").notNull().references(() => pools.id),
-  userId: integer("user_id").notNull().references(() => users.id),
-  cashAppTxId: varchar("cash_app_tx_id", { length: 100 }),
-  paymentStatus: varchar("payment_status", { length: 20 }).default("pending").notNull(), // pending, verified, rejected
-  steps: integer("steps").default(0).notNull(),
-  manualStepsBlocked: integer("manual_steps_blocked").default(0).notNull(),
-  lastSyncAt: timestamp("last_sync_at"),
-  syncSource: varchar("sync_source", { length: 30 }),
-  flagged: boolean("flagged").default(false).notNull(),
-  flagReason: text("flag_reason"),
-  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  tier: text("tier").notNull(),
+  feeCents: integer("fee_cents").notNull(),
+  durationDays: integer("duration_days").notNull(),
+  capacity: integer("capacity").notNull().default(35),
+  status: text("status").notNull().default("filling"),
+  startsAt: timestamp("starts_at", { withTimezone: true }),
+  endsAt: timestamp("ends_at", { withTimezone: true }),
+  poolCents: integer("pool_cents").notNull().default(0),
+  prizePoolCents: integer("prize_pool_cents").notNull().default(0),
+  platformCents: integer("platform_cents").notNull().default(0),
+  settledAt: timestamp("settled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const stepLogs = pgTable("step_logs", {
-  id: serial("id").primaryKey(),
-  entryId: integer("entry_id").notNull().references(() => entries.id),
-  userId: integer("user_id").notNull().references(() => users.id),
-  steps: integer("steps").notNull(),
-  source: varchar("source", { length: 20 }).default("manual").notNull(),
-  verified: boolean("verified").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+// A seat in a room. status: awaiting_payment -> payment_claimed -> paid (or refunded/cancelled)
+export const entries = pgTable(
+  "entries",
+  {
+    id: serial("id").primaryKey(),
+    roomId: integer("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    paymentCode: text("payment_code").notNull().unique(),
+    amountCents: integer("amount_cents").notNull(),
+    status: text("status").notNull().default("awaiting_payment"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("entries_room_user_idx").on(t.roomId, t.userId)],
+);
 
-export const payouts = pgTable("payouts", {
-  id: serial("id").primaryKey(),
-  poolId: integer("pool_id").notNull().references(() => pools.id),
-  userId: integer("user_id").notNull().references(() => users.id),
-  entryId: integer("entry_id").notNull().references(() => entries.id),
-  place: integer("place").notNull(), // 1,2,3
-  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  cashTag: varchar("cash_tag", { length: 50 }).notNull(),
-  status: varchar("status", { length: 20 }).default("queued").notNull(), // queued, processing, paid, failed
-  cashAppTxId: varchar("cash_app_tx_id", { length: 100 }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  paidAt: timestamp("paid_at"),
-});
+// One row per entry per calendar day (UTC). Re-submitting the same day overwrites it.
+export const stepLogs = pgTable(
+  "step_logs",
+  {
+    id: serial("id").primaryKey(),
+    entryId: integer("entry_id")
+      .notNull()
+      .references(() => entries.id, { onDelete: "cascade" }),
+    roomId: integer("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    logDate: date("log_date", { mode: "string" }).notNull(),
+    steps: integer("steps").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("step_logs_entry_date_idx").on(t.entryId, t.logDate)],
+);
 
-export const botLogs = pgTable("bot_logs", {
-  id: serial("id").primaryKey(),
-  level: varchar("level", { length: 20 }).default("info").notNull(),
-  message: text("message").notNull(),
-  meta: jsonb("meta"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-export const settings = pgTable("settings", {
-  id: serial("id").primaryKey(),
-  key: varchar("key", { length: 50 }).notNull().unique(),
-  value: text("value").notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+// Prize payouts owed to winners. status: pending -> sent -> paid (or failed)
+export const payouts = pgTable(
+  "payouts",
+  {
+    id: serial("id").primaryKey(),
+    roomId: integer("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    entryId: integer("entry_id")
+      .notNull()
+      .references(() => entries.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    place: integer("place").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    cashtag: text("cashtag").notNull(),
+    status: text("status").notNull().default("pending"),
+    providerRef: text("provider_ref"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("payouts_room_place_idx").on(t.roomId, t.place)],
+);

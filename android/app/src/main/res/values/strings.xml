@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">StepCash</string>
-    <string name="title_activity_main">StepCash</string>
-    <string name="package_name">com.stepcash.app</string>
-    <string name="custom_url_scheme">com.stepcash.app</string>
+    <string name="app_name">Walk Challenge</string>
+    <string name="title_activity_main">Walk Challenge</string>
+    <string name="package_name">com.walkchallenge.app</string>
+    <string name="custom_url_scheme">com.walkchallenge.app</string>
 </resources>
